@@ -140,12 +140,14 @@ function showTag(label, x, y) {
 }
 
 /* ---------- 3D ---------- */
-let tapped = false;
+let tapped = false, initError = null;
+const jsErrors = [];
+addEventListener('error', e => jsErrors.push(String(e.message).slice(0, 200)));
 (async () => {
   try {
     const gl = document.createElement('canvas').getContext('webgl2');
     if (!gl) throw new Error('no webgl2');
-    const { createScene } = await import('./scene.js?v=3');
+    const { createScene } = await import('./scene.js?v=4');
     scene = createScene($('#gl'), {
       reduced, still, theme: themeId,
       onTheme: t => applyUi(t),
@@ -166,11 +168,25 @@ let tapped = false;
       setTimeout(() => { if (!tapped && scene) scene.burstAt(innerWidth * .9, innerHeight * .28, true); }, 5200);
     }
   } catch (e) {
-    console.warn(e);
+    console.warn(e); initError = String(e && e.message || e);
     body.classList.add('nogl', 'reveal'); go(); setMag(1);
   }
   syncTheme();
 })();
+
+// ?diag — показать и отправить разработчику, как сайт работает на этом устройстве
+if (params.has('diag')) setTimeout(async () => {
+  const d = { t: new Date().toISOString(), ua: navigator.userAgent, dpr: devicePixelRatio, w: innerWidth, h: innerHeight,
+    cls: body.className, initError, jsErrors, scene: scene?.diag?.() ?? null };
+  const box = document.createElement('pre'); box.className = 'diag';
+  box.textContent = JSON.stringify(d, null, 1); body.append(box);
+  const s = await mqttSession(BROKERS[1], { timeout: 8000 }) || await mqttSession(BROKERS[0], { timeout: 8000 });
+  if (s) {
+    s.publish(TOPIC.replace('/theme', '/diag/') + Math.random().toString(36).slice(2, 8), JSON.stringify(d), true);
+    box.textContent = '✓ Отчёт отправлен — можно закрыть\n\n' + box.textContent;
+    setTimeout(() => s.close(), 800);
+  } else box.textContent = '✗ Нет связи для отправки\n\n' + box.textContent;
+}, 10000);
 
 // касание фона
 let down = null;

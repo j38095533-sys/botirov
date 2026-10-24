@@ -39,12 +39,6 @@ float snoise(vec3 v){
   vec4 m=max(.6-vec4(dot(x0,x0),dot(x1,x1),dot(x2,x2),dot(x3,x3)),0.); m=m*m;
   return 42.*dot(m*m,vec4(dot(p0,x0),dot(p1,x1),dot(p2,x2),dot(p3,x3)));
 }
-vec3 hash3(vec3 p){p=vec3(dot(p,vec3(127.1,311.7,74.7)),dot(p,vec3(269.5,183.3,246.1)),dot(p,vec3(113.5,271.9,124.6)));return fract(sin(p)*43758.5453123);}
-vec2 voro(vec3 x){vec3 p=floor(x),f=fract(x);float f1=8.,f2=8.;
-  for(int k=-1;k<=1;k++)for(int j=-1;j<=1;j++)for(int i=-1;i<=1;i++){
-    vec3 b=vec3(i,j,k);vec3 r=b+hash3(p+b)-f;float d=dot(r,r);
-    if(d<f1){f2=f1;f1=d;}else if(d<f2){f2=d;}}
-  return vec2(sqrt(f1),sqrt(f2));}
 `;
 const TAIL = `
   #include <tonemapping_fragment>
@@ -66,18 +60,19 @@ void main(){
 const ITEM_FS = /* glsl */`
 uniform vec3 uColA; uniform vec3 uColB; uniform float uTime; uniform float uHit; uniform float uDissolve;
 uniform float uBump; uniform float uPatCol; uniform float uSeed;
-uniform float uFogNear; uniform float uFogFar; uniform vec3 uFogCol;
+uniform float uFogNear; uniform float uFogFar; uniform vec3 uFogCol; uniform float uAppear;
 varying vec3 vObj; varying vec3 vView; varying vec3 vN; varying float vPat;
 varying vec3 vM0; varying vec3 vM1; varying vec3 vM2;
 ${NOISE}
 float pattern(vec3 p){
   float fw;
 #if PATTERN == 1
-  fw=length(fwidth(p))*6.; vec2 v=voro(p*6.+uSeed); return (1.-smoothstep(.02,.16+fw,v.y-v.x))*(1.-smoothstep(.25,.6,fw));   // сетка
+  fw=length(fwidth(p))*5.; return (1.-smoothstep(0.,.13+fw,abs(snoise(p*5.+uSeed))))*(1.-smoothstep(.25,.6,fw));           // сетка
 #elif PATTERN == 2
   fw=length(fwidth(p))*8.; return smoothstep(.45,.85,.5+.5*snoise(p*8.+uSeed))*(1.-smoothstep(.2,.5,fw));                  // бугорки
 #elif PATTERN == 3
-  fw=length(fwidth(p))*7.; vec2 v=voro(p*7.+uSeed); return (1.-smoothstep(.09,.17,v.x))*(1.-smoothstep(.3,.7,fw));         // семечки
+  vec2 q=vec2(atan(p.z,p.x)*3.8197,p.y*7.); q.x+=floor(q.y)*.5; vec2 f=fract(q)-.5;                                       // семечки рядами
+  fw=length(fwidth(q)); return (1.-smoothstep(.13,.22+fw,length(f)))*(1.-smoothstep(.4,.8,fw));
 #elif PATTERN == 5
   fw=length(fwidth(p))*24.; return smoothstep(.5,.9,.5+.5*snoise(p*24.+uSeed))*(1.-smoothstep(.2,.5,fw));                 // поры кожуры
 #elif PATTERN == 6
@@ -139,7 +134,8 @@ void main(){
   float d=length(vView);
   float fog=smoothstep(uFogNear,uFogFar,d);
   col=mix(col,uFogCol,fog*.5);
-  gl_FragColor=vec4(col,alpha*(1.-fog));
+  if(uAppear<.004) discard;
+  gl_FragColor=vec4(col,alpha*(1.-fog)*uAppear);
 ${TAIL}`;
 
 // свечение для инстансов: антитела, гранулы, ДНК
@@ -157,20 +153,20 @@ void main(){
 }`;
 const GLOW_FS = /* glsl */`
 uniform vec3 uCol; uniform float uK0; uniform float uK1; uniform float uFade;
-uniform float uFogNear; uniform float uFogFar; uniform vec3 uFogCol;
+uniform float uFogNear; uniform float uFogFar; uniform vec3 uFogCol; uniform float uAppear;
 varying vec3 vN; varying vec3 vView; varying vec3 vC;
 void main(){
   vec3 n=normalize(vN); float f=pow(1.-abs(dot(n,normalize(-vView))),2.);
   vec3 c=uCol*vC*(uK0+uK1*f);
   c=mix(c,uFogCol,smoothstep(uFogNear,uFogFar,length(vView))*.85);
-  gl_FragColor=vec4(c*uFade,1.);
+  gl_FragColor=vec4(c*uFade*uAppear,1.);
 ${TAIL}`;
 
 const LINE_VS = /* glsl */`
 varying float vD; void main(){ vec4 mv=modelViewMatrix*vec4(position,1.); vD=length(mv.xyz); gl_Position=projectionMatrix*mv; }`;
 const LINE_FS = /* glsl */`
-uniform vec3 uCol; uniform float uOpacity; uniform float uFogNear; uniform float uFogFar; varying float vD;
-void main(){ float a=uOpacity*(1.-smoothstep(uFogNear,uFogFar,vD)); gl_FragColor=vec4(uCol*a,a); }`;
+uniform vec3 uCol; uniform float uOpacity; uniform float uFogNear; uniform float uFogFar; uniform float uAppear; varying float vD;
+void main(){ float a=uOpacity*uAppear*(1.-smoothstep(uFogNear,uFogFar,vD)); gl_FragColor=vec4(uCol*a,a); }`;
 
 const BG_FS = /* glsl */`
 uniform float uTime; uniform vec2 uRes; uniform vec3 uC0; uniform vec3 uC1; uniform vec3 uC2; uniform vec3 uC3;
@@ -248,7 +244,7 @@ void main(){
 
 const FLOW_VS = /* glsl */`
 attribute vec4 aR; attribute float aS;
-uniform float uTime; uniform float uPR; uniform float uIntro; uniform float uAsp; uniform vec4 uTap;
+uniform float uTime; uniform float uPR; uniform float uIntro; uniform float uAsp; uniform vec4 uTap; uniform float uAppear;
 varying float vA; varying float vS;
 void main(){
   float z=aR.w; float hh=(12.-z)*.2867*1.1; float hw=hh*uAsp;
@@ -262,7 +258,7 @@ void main(){
   vec4 mv=modelViewMatrix*vec4(p,1.);
   gl_PointSize=(1.6+aS*3.)*uPR*(18./-mv.z)*(1.+wave*.8);
   float dash=.35+.65*smoothstep(.2,.9,sin(x/hw*9.-uTime*1.6+aR.x*7.));
-  vA=smoothstep(0.,.12,ph)*smoothstep(1.,.85,ph)*(.45+.9*aS)*dash*uIntro*(1.+wave*2.);
+  vA=smoothstep(0.,.12,ph)*smoothstep(1.,.85,ph)*(.45+.9*aS)*dash*uIntro*uAppear*(1.+wave*2.);
   vS=aS;
   gl_Position=projectionMatrix*mv;
 }`;
@@ -558,7 +554,8 @@ export function createScene(canvas, opts) {
   const camera = new THREE.PerspectiveCamera(FOV, 1, .1, 120);
   camera.position.set(0, 0, CAM_Z);
   const fog = { near: 12, far: 31, col: new THREE.Color() };
-  const fogU = () => ({ uFogNear: { value: fog.near }, uFogFar: { value: fog.far }, uFogCol: { value: fog.col } });
+  const appearU = { value: 0 };   // мир темы проявляется, когда его шейдеры готовы
+  const fogU = () => ({ uFogNear: { value: fog.near }, uFogFar: { value: fog.far }, uFogCol: { value: fog.col }, uAppear: appearU });
 
   // фон
   const bgMat = new THREE.ShaderMaterial({
@@ -638,9 +635,18 @@ export function createScene(canvas, opts) {
   let W = 1, H = 1;
   const halfAt = z => { const hh = (CAM_Z - z) * TAN; return { hh, hw: hh * camera.aspect }; };
   let world = null, items = [], abs = [], abMesh = null, flowMat = null, helices = [], themeId = null, def = null, compiled = false;
+  let lowShaders = false, compileMs = 0, compileT0 = 0, buildNo = 0;
+  const diag = { errors: [], gpu: '' };
+  try { const gl = renderer.getContext(), ext = gl.getExtension('WEBGL_debug_renderer_info'); diag.gpu = ext ? gl.getParameter(ext.UNMASKED_RENDERER_WEBGL) : gl.getParameter(gl.RENDERER); } catch (e) { /* */ }
+  renderer.debug.onShaderError = (gl, program, vs, fs) => {
+    const log = (gl.getShaderInfoLog(fs) || '') + (gl.getShaderInfoLog(vs) || '') + (gl.getProgramInfoLog(program) || '');
+    diag.errors.push(log.slice(0, 300));
+    if (!lowShaders) { lowShaders = true; setTimeout(() => buildWorld(themeId), 0); }
+  };
 
   function itemMat(spec) {
     const mode = spec.m ?? 0;
+    if (lowShaders) spec = { ...spec, p: 4 };
     return new THREE.ShaderMaterial({
       vertexShader: ITEM_VS, fragmentShader: ITEM_FS, transparent: true, depthWrite: mode !== 2 && mode !== 3,
       defines: { PATTERN: spec.p ?? 4, MODE: mode },
@@ -689,7 +695,7 @@ export function createScene(canvas, opts) {
     } else if (spec.k === 'dandelion') {
       const ms = itemMat({ m: 1, a: '#6b4a2a', b: '#a07848', p: 0, pc: .3, bump: .01 }); mats.push(ms);
       const lm = new THREE.ShaderMaterial({ vertexShader: LINE_VS, fragmentShader: LINE_FS, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
-        uniforms: { uCol: { value: new THREE.Color('#fff4e0') }, uOpacity: { value: .9 }, uFogNear: { value: fog.near }, uFogFar: { value: fog.far } } });
+        uniforms: { uCol: { value: new THREE.Color('#fff4e0') }, uOpacity: { value: .9 }, uFogNear: { value: fog.near }, uFogFar: { value: fog.far }, uAppear: appearU } });
       lm.userData.base = .9; others.push(lm);
       obj = new THREE.Group();
       const seed = new THREE.Mesh(geo('seed'), ms); seed.position.y = -.72; obj.add(seed);
@@ -768,7 +774,7 @@ export function createScene(canvas, opts) {
       g.setAttribute('aR', new THREE.BufferAttribute(R, 4));
       g.setAttribute('aS', new THREE.BufferAttribute(S, 1));
       flowMat = new THREE.ShaderMaterial({ vertexShader: FLOW_VS, fragmentShader: FLOW_FS, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
-        uniforms: { uTime: { value: 0 }, uPR: { value: pr }, uIntro: { value: 0 }, uAsp: { value: 1 }, uTap: { value: new THREE.Vector4(0, 0, -99, 0) },
+        uniforms: { uTime: { value: 0 }, uPR: { value: pr }, uIntro: { value: 0 }, uAsp: { value: 1 }, uTap: { value: new THREE.Vector4(0, 0, -99, 0) }, uAppear: appearU,
           uDA: { value: new THREE.Color('#5fdcff') }, uDB: { value: new THREE.Color('#ffffff') } } });
       const pts = new THREE.Points(g, flowMat); pts.frustumCulled = false; pts.renderOrder = 1; pts.userData.ownGeo = true;
       world.add(pts);
@@ -801,14 +807,18 @@ export function createScene(canvas, opts) {
     }
     layout();
     opts.onTheme?.(THEMES[themeId]);
-    // шейдеры собираем в фоне (тот же вариант, что рисует composer), чтобы страница не замирала
-    compiled = false;
+    // шейдеры собираем в фоне (тот же вариант, что рисует composer); пока не готовы — видно фон, мир проявится потом
+    compiled = false; appearU.value = 0; compileT0 = performance.now();
+    const my = ++buildNo;
     const prev = renderer.getRenderTarget();
     renderer.setRenderTarget(composer.readBuffer);
     let job;
     try { job = renderer.compileAsync(scene, camera); } catch (e) { job = Promise.resolve(); }
     renderer.setRenderTarget(prev);
-    return job.then(() => { compiled = true; }, () => { compiled = true; });
+    world.visible = false;
+    const done = () => { if (my !== buildNo || compiled) return; compiled = true; world.visible = true; compileMs = Math.round(performance.now() - compileT0); };
+    setTimeout(done, 6000);                          // страховка: даже если браузер не сообщил о готовности
+    return job.then(done, done);
   }
 
   function layout() {
@@ -901,16 +911,17 @@ export function createScene(canvas, opts) {
   let introT = reduced ? 1 : 0;
   const INTRO = 2.6;
   let last = performance.now(), frameNo = 0, renders = 0;
-  let frames = 0, acc = 0, slow = 0;
+  let frames = 0, acc = 0, slow = 0, lastFps = 0;
   const dummy = new THREE.Object3D();
 
   function frame(now) {
     // пока листают страницу — фон замирает, вся мощность телефона уходит на плавную прокрутку
     frameNo++;
-    if (now - lastScroll < 160 && compiled && introT >= 1) { last = now; if (!stopped) requestAnimationFrame(frame); return; }
+    if (now - lastScroll < 160 && introT >= 1) { last = now; if (!stopped) requestAnimationFrame(frame); return; }
     const dt = Math.min(.05, (now - last) / 1000); last = now;
     time += dt * (reduced ? .25 : 1);
-    if (introT < 1 && compiled) introT = Math.min(1, introT + dt / INTRO);
+    if (introT < 1) introT = Math.min(1, introT + dt / INTRO);
+    if (compiled && appearU.value < 1) appearU.value = Math.min(1, appearU.value + dt / .9);
     const ie = ease(introT);
     opts.onIntro?.(introT);
 
@@ -1008,11 +1019,13 @@ export function createScene(canvas, opts) {
     }
 
     const scrolling = now - lastScroll < 220;
-    if (compiled) { renders++; if (useBloom) composer.render(); else renderer.render(scene, camera); }
+    renders++;
+    if (useBloom) composer.render(); else renderer.render(scene, camera);
 
     frames++; acc += dt;
     if (acc > 1.5) {
       const fps = frames / acc; frames = 0; acc = 0;
+      lastFps = fps;
       if (opts.still || scrolling || !compiled) { /* не подстраиваемся */ }
       else if (fps < 45 && introT >= 1) {
         slow++;
@@ -1038,6 +1051,7 @@ export function createScene(canvas, opts) {
     burstAt,
     skipIntro() { introT = Math.max(introT, .999); },
     quality: () => ({ pr, useBloom, theme: themeId, frames: frameNo, renders }),
+    diag: () => ({ gpu: diag.gpu, errors: diag.errors, lowShaders, compiled, compileMs, fps: Math.round(lastFps), pr: +pr.toFixed(2), bloom: useBloom, theme: themeId, items: items.length }),
     get theme() { return themeId; },
     // смена темы: экран плавно гаснет, мир пересобирается, экран проявляется
     setTheme(id, instant = false) {
@@ -1046,7 +1060,7 @@ export function createScene(canvas, opts) {
       if (instant) { buildWorld(id); return; }
       canvas.style.transition = 'opacity .45s ease';
       canvas.style.opacity = '0';
-      switching = setTimeout(() => buildWorld(id).then(() => requestAnimationFrame(() => { canvas.style.opacity = '1'; })), 470);
+      switching = setTimeout(() => { buildWorld(id); canvas.style.opacity = '1'; }, 470);
     },
   };
 }

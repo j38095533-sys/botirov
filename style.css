@@ -237,3 +237,6 @@ body.go .tile { animation: tileIn 1s cubic-bezier(.2, .8, .2, 1) forwards; anima
 @media (prefers-reduced-motion: reduce) {
   .tile::after, .hud .dot, .pulse::after, .hud-r .b i::after { animation: none !important; }
 }
+
+.diag { position: fixed; z-index: 30; left: 8px; right: 8px; top: 8px; max-height: 70vh; overflow: auto; margin: 0; padding: 10px;
+  border-radius: 10px; background: rgba(0, 0, 0, .88); color: #b8ffcf; font: 11px/1.35 var(--mono); white-space: pre-wrap; word-break: break-all; }
