@@ -46,7 +46,12 @@ function renderGrid() {
       <span class="badge">На сайте</span>
       <span class="t">${t.name}</span><span class="d">${t.desc}</span>
     </button>`).join('');
-  $('#grid').addEventListener('click', e => { const c = e.target.closest('.card'); if (c) select(c.dataset.id); });
+  $('#grid').addEventListener('click', e => {
+    const c = e.target.closest('.card'); if (!c) return;
+    select(c.dataset.id);
+    // на телефоне предпросмотр сверху — поднимаемся к нему, кнопка «Поставить» прилипла снизу
+    if (matchMedia('(max-width: 859px)').matches) document.querySelector('.preview').scrollIntoView({ behavior: 'smooth', block: 'start' });
+  });
 }
 function markLive() {
   const id = live?.t || DEFAULT_THEME;
